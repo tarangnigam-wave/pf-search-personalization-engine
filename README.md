@@ -164,3 +164,41 @@ light_brain.pkl – Trained model (must match feature columns in app_7.py)
 
 
 uvicorn app_7:app --host 0.0.0.0 --port 8000 --reload
+
+
+
+## Part 3: Future Scope (Phase 2)
+
+### 1. Rental Period Logic (`price_type`)
+
+#### Current
+- Listings are filtered only by `category_id` (Buy vs Rent).
+- Rental duration (Daily / Weekly / Yearly) is not distinguished.
+
+#### Problems
+- Daily rentals (e.g., **500 AED/day**) can appear alongside yearly rentals (e.g., **50,000 AED/year**).
+- This creates misleading price comparisons and poor user experience.
+
+#### Future
+- Introduce explicit `price_type` handling:
+  - `daily`
+  - `weekly`
+  - `yearly`
+- Enforce filtering and validation so users only see listings within the same rental period.
+- Align frontend filters, backend logic, and search results consistently.
+
+> **Note:** The current AI model (`light_brain.pkl`) does **not** use `price_type` as a feature.  
+> This enhancement will initially be a **logic-layer improvement**, with model retraining planned in a later phase.
+
+---
+
+### 2. Hierarchical Location Search
+
+#### Current
+- Location matching is handled via:
+  - Radius-based geospatial search, or
+  - Simple keyword matching (e.g., `"Marina"`).
+- No understanding of parent–child location relationships.
+
+
+
