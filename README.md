@@ -119,7 +119,7 @@ The API accepts a strict JSON structure derived from a Protocol Buffers contract
 
 ---
 
-### Sample Payload
+## Sample Payload
 ```json
 {
   "filters": {
@@ -144,25 +144,16 @@ The API accepts a strict JSON structure derived from a Protocol Buffers contract
 Dependencies
 
 fastapi
-
 uvicorn
-
 pandas
-
 xgboost
-
 joblib
-
 pyarrow
 
 
 Required Files
-
 listings.parquet – Listings database
-
 light_brain.pkl – Trained model (must match feature columns in app_7.py)
-
-
 uvicorn app_7:app --host 0.0.0.0 --port 8000 --reload
 
 
