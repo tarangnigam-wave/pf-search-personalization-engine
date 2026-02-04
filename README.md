@@ -1,148 +1,166 @@
-# Property Finder Hybrid Recommendation Engine
+# 🏠 Property Finder Recommendation Engine (v6.6.0)
 
-A high-performance, stateless recommendation engine designed to deliver personalized property listings at scale. The system uses a hybrid scoring strategy that combines **XGBoost-based Learning to Rank (LTR)** with **geospatial waterfall logic** and **real-time personalization**.
+## 1. Project Overview
+This is a production-ready **Hybrid Recommendation Engine** designed to rank real estate listings based on a combination of:
 
-**Version:** 2.0.0
+- **User Intent (Filters)**
+- **Geospatial Proximity**
+- **AI-Driven Popularity**
 
----
-
-## Overview
-
-The engine serves ranked property recommendations through a FastAPI service. It is optimized for low latency, horizontal scalability, and daily data refreshes. Recommendations are generated using a multi-stage filtering and scoring pipeline to ensure both relevance and coverage.
-
----
-
-## System Architecture
-
-The recommendation flow consists of the following stages:
-
-### 1. Strict Filtering (Database Level)
-Ensures only valid listings are considered:
-- Offering type (Buy / Rent)
-- Property type
-- Bedroom count
-- Price range
-
-This minimizes unnecessary computation and guarantees baseline relevance.
-
-### 2. Geospatial Waterfall
-If insufficient results are found in the exact target location, the engine progressively expands the search radius:
-- 1.5 km
-- 3.5 km
-- Up to 10 km
-
-This guarantees that users always receive results, even in low-density areas.
-
-### 3. AI Ranking (60% Weight)
-Powered by an **XGBoost Learning to Rank model** (`light_brain.pkl`) that predicts engagement probability using:
-- Historical popularity signals
-- Listing attributes
-- Freshness-adjusted features
-
-### 4. Personalization (Centroid Logic)
-Listings are re-ranked in real time using user interaction centroids:
-- Average price of interacted listings
-- Average latitude and longitude
-
-This provides a tailored experience without requiring stateful storage.
+Unlike standard search engines that simply sort by price, this engine uses a **Learning-to-Rank (LTR) XGBoost Model** to predict which properties are most likely to generate a lead, balancing **Best Match** with **Highest Quality**.
 
 ---
 
-## Repository Structure
+## 2. System Architecture
 
-| File | Role | Description |
-|-----|------|-------------|
-| `app_2.py` | API Service | FastAPI application serving `/api/v1/recommend` and `/health` endpoints |
-| `etl_script.py` | Data Pipeline | Refreshes property inventory and engagement statistics |
-| `light_brain.pkl` | AI Model | Trained XGBoost LTR model and feature set |
-| `listings.parquet` | Inventory DB | High-speed, compressed store of active listings |
-| `Dockerfile` | Containerization | Production-ready Docker image blueprint |
-| `requirements.txt` | Dependencies | Pinned Python libraries (FastAPI, Pandas, XGBoost, etc.) |
+The system runs as a high-performance **FastAPI** service (`app_7.py`) consisting of three layers.
 
 ---
 
-## Installation and Setup
-
-### Local Development
-
-#### Install Dependencies
-```bash
-pip install -r requirements.txt
-
-
-Run the API
-uvicorn app_2:app --reload --host 0.0.0.0 --port 8000
-
-
-Containerization
-
-docker build -t property-ai-engine .
-docker run -p 8000:8000 property-ai-engine
-
-
-## Data Lifecycle (ETL)
-
-To maintain recommendation accuracy and freshness, the inventory must be refreshed daily using `etl_script.py`.
-
-### Inventory Extraction
-- Fetches listings marked as `online`
-- Limited to the last 6 months
-- Joins valid pricing and geospatial tower data
-
-### Engagement Weighting
-
-Popularity is computed using weighted Snowplow events:
-
-| Event Type | Weight |
-|-----------|--------|
-| `content_view` | 1 |
-| `lead_click`, `new_projects_lead_click` | 10 |
-| `lead_send`, `instapage_lead` | 50 |
-
-### Freshness Boost
-A time-based decay function ensures newly published listings receive increased visibility without overwhelming historical performance.
+### Layer 1: The Data Layer (`listings.parquet`)
+- **Storage:** Parquet format for ultra-fast columnar reads (~72k+ listings).
+- **Normalization on Startup:**
+  - `furnished_flag`: Maps `"yes"`, `"true"`, `"1"` → `1`
+  - `completion_status`: Maps `"ready"`, `"completed"` → `"completed"`
+  - `listing_date`: Parsed for freshness calculations
+- **Geospatial Index:**
+  - Pre-calculated centroids (Lat/Lon) for known locations (e.g., *Dubai Marina*)
+  - Enables instant radius-based searches
 
 ---
 
-## API Usage
+### Layer 2: The Logic Layer (Filters & Search)
 
-### Recommendation Endpoint
-**POST** `/api/v1/recommend`
+Before AI scoring, strict business rules narrow down the dataset:
 
-#### Sample Request
+1. **Hard Filters**
+   - Category (Buy / Rent)
+   - Price Range
+   - Bedrooms
+   - Bathrooms
+   - Area
+
+2. **Geospatial Logic**
+   - **Radius Search:** Uses Haversine Distance between user and listings
+   - **Keyword Match:**  
+     Example: searching `"Marina"` resolves to the Dubai Marina centroid and applies a **1.5km – 3.5km radius**
+
+3. **Trust Logic**
+   - Filters for **Super Agents**
+   - Based on a dynamic `trust_score` threshold (Top 5% of agents)
+
+---
+
+### Layer 3: The AI Brain (`light_brain.pkl`)
+
+This is the **core intelligence** of the system.
+
+- **Model:** XGBoost Classifier
+- **Objective:** Predict probability of conversion (`lead_submission_count > 0`)
+
+#### Key Features Used
+- `smart_popularity_score` – weighted aggregate of views, clicks, and leads
+- `quality_score` – internal listing quality rating
+- `trust_score` – agent performance metric
+- `freshness_score` – decay-based boost for newer listings
+
+#### Categorical Features
+- `offering_type`
+- `property_type`
+- `location_id`
+- `furnished_flag`
+
+---
+
+## 3. Scoring & Sorting Logic
+
+The engine supports two ranking modes.
+
+---
+
+### Mode A: Featured (Smart AI Rank)
+
+Default behavior when no explicit sort is selected.
+
+\[
+\text{Final Rank} =
+\text{AI Probability Score}
+- (\text{Distance in KM} \times 0.1)
++ \text{Luxury Boost}
+\]
+
+**Components**
+- **AI Probability:** Likelihood (0–100%) that a user will inquire
+- **Distance Penalty:** Slight penalty for farther listings
+- **Luxury Boost:** Small visibility boost for properties > 5,000,000 AED
+
+---
+
+### Mode B: Explicit Sort
+
+When a user selects a manual sort, AI ranking is bypassed for ordering, but still returned as metadata.
+
+Supported sorts:
+- **Price:** Low → High / High → Low
+- **Bedrooms:** Least → Most
+- **Newest:** By `listing_date`
+
+---
+
+## 4. API Interface
+
+**Endpoint**
+
+
+POST /api/v1/search
+
+
+The API accepts a strict JSON structure derived from a Protocol Buffers contract.
+
+---
+
+### Sample Payload
 ```json
 {
-  "location_name": "Dubai Marina",
-  "bedrooms": "2",
-  "offering_type": "sale",
-  "user_profile": {
-    "target_price": 1200000,
-    "target_lat": 25.07,
-    "target_lon": 55.14,
-    "persona": "guest"
+  "filters": {
+    "category_id": 2,
+    "min_price": 50000,
+    "max_price": 150000,
+    "keywords": ["Marina"],
+    "number_of_bedrooms": [1, 2],
+    "is_super_agent": false
+  },
+  "pagination": {
+    "page": 1,
+    "limit": 20
+  },
+  "sorting": {
+    "sort": "featured"
   }
 }
 
 
-## Deployment Guidelines
+5. Setup & Requirements
+Dependencies
 
-### Platform
-- AWS App Runner
-- AWS ECS Fargate
+fastapi
 
-### Scalability
-- Stateless architecture
-- Horizontal auto-scaling based on CPU and memory utilization
+uvicorn
 
-### Resource Requirements
-- Minimum: **1 vCPU**
-- Minimum: **2 GB RAM**
-- Required to support Pandas and XGBoost in-memory operations
+pandas
 
-### CI/CD
-- Build and push Docker images to AWS ECR on every merge to the `main` branch
+xgboost
 
-### Automation
-- Schedule `etl_script.py` to run nightly
-- Refresh `listings.parquet`
-- Trigger redeployment or S3 sync to maintain data consistency
+joblib
+
+pyarrow
+
+
+Required Files
+
+listings.parquet – Listings database
+
+light_brain.pkl – Trained model (must match feature columns in app_7.py)
+
+
+uvicorn app_7:app --host 0.0.0.0 --port 8000 --reload
