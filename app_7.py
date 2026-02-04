@@ -166,9 +166,9 @@ class SearchFilters(BaseModel):
     max_area: Optional[int] = None
     is_super_agent: Optional[bool] = False 
     is_verified: Optional[bool] = False
-    furnished: Optional[int] = None       
+    furnished: Optional[int] = None        
     completion_status: Optional[int] = None 
-    listed_within: Optional[int] = None   
+    listed_within: Optional[int] = None    
     near_by: Optional[NearBy] = None
 
 class ProtoSearchRequest(BaseModel):
@@ -286,27 +286,30 @@ async def search(req: ProtoSearchRequest):
         pool['final_rank'] = pool['ai_score'] - (pool.get('dist_km', 0) * 0.1)
 
     # --- D. SORTING LOGIC (NEW) ---
-    sort_option = req.sorting.sort if (req.sorting and req.sorting.sort) else SortBy.featured
-    
-    if sort_option == SortBy.priceAsc:
-        pool = pool.sort_values('price', ascending=True)
-        search_method += "_sort_price_low"
-    elif sort_option == SortBy.priceDesc:
-        pool = pool.sort_values('price', ascending=False)
-        search_method += "_sort_price_high"
-    elif sort_option == SortBy.bedroomAsc:
-        pool = pool.sort_values('beds_int', ascending=True)
-        search_method += "_sort_beds_least"
-    elif sort_option == SortBy.bedroomDesc:
-        pool = pool.sort_values('beds_int', ascending=False)
-        search_method += "_sort_beds_most"
-    elif sort_option == SortBy.newest:
-        if 'listing_date' in pool.columns:
-            pool = pool.sort_values('listing_date', ascending=False)
-            search_method += "_sort_newest"
-    else:
-        # Default: Featured (Smart AI Rank)
-        pool = pool.sort_values('final_rank', ascending=False)
+    # FIX: Added check 'if not pool.empty' to prevent KeyError on empty results
+    if not pool.empty:
+        sort_option = req.sorting.sort if (req.sorting and req.sorting.sort) else SortBy.featured
+        
+        if sort_option == SortBy.priceAsc:
+            pool = pool.sort_values('price', ascending=True)
+            search_method += "_sort_price_low"
+        elif sort_option == SortBy.priceDesc:
+            pool = pool.sort_values('price', ascending=False)
+            search_method += "_sort_price_high"
+        elif sort_option == SortBy.bedroomAsc:
+            pool = pool.sort_values('beds_int', ascending=True)
+            search_method += "_sort_beds_least"
+        elif sort_option == SortBy.bedroomDesc:
+            pool = pool.sort_values('beds_int', ascending=False)
+            search_method += "_sort_beds_most"
+        elif sort_option == SortBy.newest:
+            if 'listing_date' in pool.columns:
+                pool = pool.sort_values('listing_date', ascending=False)
+                search_method += "_sort_newest"
+        else:
+            # Default: Featured (Smart AI Rank)
+            if 'final_rank' in pool.columns:
+                pool = pool.sort_values('final_rank', ascending=False)
 
     # --- E. RESPONSE ---
     limit = req.pagination.limit if req.pagination else 20
@@ -315,6 +318,7 @@ async def search(req: ProtoSearchRequest):
     end_idx = start_idx + limit
 
     results = []
+    # FIX: Safe iteration (will just do nothing if pool is empty)
     for _, row in pool.iloc[start_idx:end_idx].iterrows():
         img_url = row.get('image_url')
         if not img_url or pd.isna(img_url): img_url = "https://static.shared.propertyfinder.ae/media/images/listing/default.jpg"
